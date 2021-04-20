@@ -9,11 +9,11 @@ type Read* = object
 
 proc process_read*(s: string, idx: SvIndex, k: int = 25, spacedSeeds: bool = false, space: int = 50): Read =
     # find SVs with kmers intersecting with those from this read.
-    var kmers = Dna(s).dna_to_kmers(k)
+    var kmers = (cast[Dna](s)).dna_to_kmers(k)
     if(spacedSeeds):
         kmers = spacing_kmer(kmers, space)
     for kmer in kmers.seeds:
-        var matching_svs = idx.lookupKmer(kmer)
+        var matching_svs = idx.lookupKmer(kmer.kmer)
         for svId in matching_svs:
             result.compatible_SVs.inc(svId)
 

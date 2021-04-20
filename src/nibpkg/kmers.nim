@@ -46,8 +46,8 @@ type
     spot_t* = ref object of pot_t
         ht*: tables.TableRef[Bin, int]
 
-var seq_nt4_table: array[256, int] = [
-        0, 1, 2, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+var seq_nt4_table: array[256, uint64] = [
+        0'u64, 1, 2, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
@@ -102,7 +102,7 @@ proc encode(sq: Dna) =
         reverse_bin: Bin = 0
     for i in 0 ..< k:
         let ch = cast[uint8](sq[i])
-        let c = seq_nt4_table[ch].uint64
+        let c = seq_nt4_table[ch]
         assert c < 4
         forward_bin = (forward_bin << 2 or c) and mask
         reverse_bin = (reverse_bin >> 2) or (
@@ -113,7 +113,7 @@ proc encode(sq: Dna) =
 ##  @param  k - kmer size (<=32)
 ##  @return pot
 #
-proc dna_to_kmers*(sq: Dna; k: int): pot_t =
+proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
     if k > 32:
         raiseEx("k > 32")
 
@@ -132,24 +132,19 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t =
     forward_kmer.strand = forward
     reverse_kmer.strand = reverse
 
-    var kmers: pot_t
-    new(kmers)
-    kmers.seeds = newSeqOfCap[seed_t](max(sq.len - int(k) + 1,0))
-    kmers.word_size = k.uint8
+    let L = 2 * max(sq.len - int(k) + 1,0)
+    result = pot_t(seeds: newSeqOfCap[seed_t](L),
+                   word_size:k.uint8)
 
     ##  lk is the length of the kmers being built on the fly. The variable n is the total number of
     var
-        i: int
-        lk: int
-        n: int
-    i = 0
-    lk = 0
-    n = 0
+        lk: int = 0
+        n: int = 0
 
-    while i < sq.len():
-        let ch = cast[uint8](sq[i])
-        let c = seq_nt4_table[ch].uint64
-        if c < 4:
+    for c in sq:
+        let ch = cast[uint8](c)
+        let c = seq_nt4_table[ch]
+        if likely(c < 4):
             forward_kmer.kmer = (forward_kmer.kmer << 2 or c) and mask
             reverse_kmer.kmer = (reverse_kmer.kmer >> 2) or (
                     3'u64 xor c) << shift1
@@ -159,24 +154,24 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t =
         else:
             ##  advance the window beyond the unknown character
             lk = 0
-            inc(i, k)
-            inc(forward_kmer.pos, k)
+            inc(forward_kmer.pos)
             forward_kmer.kmer = 0
-            inc(reverse_kmer.pos, k)
+            inc(reverse_kmer.pos)
             reverse_kmer.kmer = 0
 
         if lk >= k:
             inc(n, 2)
-            kmers.seeds.add(forward_kmer)
-            kmers.seeds.add(reverse_kmer)
+            result.seeds.add(forward_kmer)
+            result.seeds.add(reverse_kmer)
             inc(forward_kmer.pos, 1)
             inc(reverse_kmer.pos, 1)
-        inc(i)
 
 
-
-
-    return kmers
+    when defined(check_seed_length):
+        if L != result.seeds.len:
+            echo L, " ", result.seeds.len
+        else:
+            echo "OK"
 
 ##  A function to convert the binary DNA back into character
 ##  @param kmer   up to 32 2-bit bases
@@ -378,3 +373,4 @@ proc spacing_kmer*(pot: pot_t; space: int): pot_t =
         k.strand = left.strand
         k.pos = left.pos
         result.seeds.add(k)
+    echo result.seeds.len
