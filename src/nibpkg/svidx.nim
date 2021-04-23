@@ -21,13 +21,12 @@ type
 proc len*(idx: SvIndex): int =
     return idx.counts.len
 
-
 #Cost savings on allocations?
 var empty: seq[uint32]
 
-proc lookupKmer*(idx: SvIndex, kmer: seed_t): seq[uint32] {.noInit.} =
-    if kmer.kmer in idx.counts:
-        return idx.counts[kmer.kmer].svs
+proc lookupKmer*(idx: SvIndex, kmer: uint64): seq[uint32] {.noInit.} =
+    if kmer in idx.counts:
+        return idx.counts[kmer].svs
     return empty
 
 proc dumpIndexToFile*(idx: SvIndex, fn: string) =
