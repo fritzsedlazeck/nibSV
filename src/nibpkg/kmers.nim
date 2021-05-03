@@ -138,11 +138,12 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
 
     ##  lk is the length of the kmers being built on the fly. The variable n is the total number of
     var
+        i: int = 0
         lk: int = 0
         n: int = 0
 
-    for c in sq:
-        let ch = cast[uint8](c)
+    while i < sq.len():
+        let ch = cast[uint8](sq[i])
         let c = seq_nt4_table[ch]
         if likely(c < 4):
             forward_kmer.kmer = (forward_kmer.kmer << 2 or c) and mask
@@ -154,9 +155,10 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
         else:
             ##  advance the window beyond the unknown character
             lk = 0
-            inc(forward_kmer.pos)
+            inc(i, k)
+            inc(forward_kmer.pos, k)
             forward_kmer.kmer = 0
-            inc(reverse_kmer.pos)
+            inc(reverse_kmer.pos, k)
             reverse_kmer.kmer = 0
 
         if lk >= k:
@@ -165,6 +167,7 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
             result.seeds.add(reverse_kmer)
             inc(forward_kmer.pos, 1)
             inc(reverse_kmer.pos, 1)
+        inc(i)
 
 
     when defined(check_seed_length):
