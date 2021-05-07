@@ -9,6 +9,20 @@ from ./util import raiseEx, PbError
 
 export PbError
 
+import hashes
+
+
+proc hash*(x:uint64): Hash {.inline, noInit.} =
+  ## this overrides the default (non) hash function for uint64 in nim.
+  ## moremur hash from Pelle Evensen
+  ## http://mostlymangling.blogspot.com/2019/12/stronger-better-morer-moremur-better.html
+  var x = x xor (x shr 27)
+  x = x * 0x3C79AC492BA7B653'u64
+  x = x xor (x shr 33)
+  x = x * 0x1C69B3F74AC4AE35'u64
+  result = Hash(x xor (x shr 27))
+
+
 type
     Dna* = string # someday, this might be an array
     Bin* = uint64 # compact bitvector of DNA

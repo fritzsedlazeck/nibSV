@@ -16,17 +16,18 @@ type
 proc retrieve_flanking_sequences_from_fai*(fastaIdx: Fai, chrom: string,
         start_pos: int, end_pos: int, flank: int): FlankSeq =
   ## this function lacks a return
-  result.left = fastaIdx.get(chrom, max(0, start_pos - flank), start_pos)
-  result.right = fastaIdx.get(chrom, end_pos, end_pos + flank)
+  result.left = fastaIdx.get(chrom, max(0, start_pos - flank + 1), start_pos)
+  result.right = fastaIdx.get(chrom, end_pos, end_pos + flank - 1)
 
-proc kmerize(s: string, k: int = 25, space: int = 0): seq[seed_t] =
+
+proc kmerize(s: string, k: int, space: int): seq[seed_t] =
   var kmers =  Dna(s).dna_to_kmers(k)
   if space > 0:
       kmers = spacing_kmer(kmers, space)
   return kmers.seeds
 
 proc composePositioned*(variant: Variant, left_flank: string,
-    right_flank: string, k: int = 25 ; space: int = 0): PositionedSequence =
+    right_flank: string, k: int, space: int): PositionedSequence =
   ## Takes in a VCF variant, the 5' and 3' reference flanking sequences,
   ## and a kmer size. Produces a PositionedSequence, which holds the ref/alt
   ## sequences as well as the kmers of those sequences (in addition to
@@ -34,7 +35,7 @@ proc composePositioned*(variant: Variant, left_flank: string,
   var variant_type: string
   doAssert variant.info.get("SVTYPE", variant_type) == Status.OK
   if variant_type == "DEL":
-    var deleted_bases: string = $variant.REF ## Chop the reference base prefix in the REF allele.
+    var deleted_bases: string = $variant.REF[1 ..< ^0]
     result.sequences.ref_seq = left_flank & deleted_bases & right_flank
     result.sequences.alt_seq = left_flank & right_flank
     if k > 0:
@@ -57,7 +58,7 @@ proc composePositioned*(variant: Variant, left_flank: string,
   result.chrom = $variant.CHROM
 
 
-proc compose_variants*(variant_file: string, reference_file: string; k: int = 31, space: int = 0): seq[
+proc compose_variants*(variant_file: string, reference_file: string; k: int, space: int): seq[
     PositionedSequence] =
   ## function to compose variants from their sequence / FASTA flanking regions
   ## Returns a Sequence of strings representing the DNA sequence of the flanking

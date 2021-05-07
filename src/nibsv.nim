@@ -5,9 +5,8 @@ from nibpkg/captain import nil
 when isMainModule:
   import cligen
   dispatchMulti(
-        [compose.compose_variants, cmdName = "compose"],
-        [classify.buildSvIndex, cmdName = "lookup"],
-        [classify.main_classify, cmdName = "classify"],
+        # [compose.compose_variants, cmdName = "compose"],
+        # [classify.buildSvIndex, cmdName = "lookup"],
         [captain.main_runner, cmdName = "main",
         help={
         "variants-fn": "long read VCF SV calls",

@@ -5,7 +5,7 @@ import ./read
 import ./svidx
 from ./compose import nil
 
-proc buildSvIndex*(reference_path: string, vcf_path: string, flank: int = 100, k: int = 25, space: int = 0): SvIndex =
+proc buildSvIndex*(reference_path: string, vcf_path: string, flank: int, k: int, space: int): SvIndex =
   ## Open FASTA index
   var fai: Fai
   doAssert fai.open(reference_path), "Failed to open FASTA file: " & reference_path
@@ -31,14 +31,18 @@ proc buildSvIndex*(reference_path: string, vcf_path: string, flank: int = 100, k
 
     sv_idx.inc
 
-proc classify_bam(filename: string, idx: SvIndex, k: int = 25, spacedSeeds: bool = false, space: int = 50, threads: int = 2): CountTableRef[uint32] =
+proc classify_bam(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, space: int, threads: int, fasta:cstring): CountTableRef[uint32] =
     new(result)
 
     var bamfile: Bam
-    open(bamfile, filename, index = false, threads=threads)
+    open(bamfile, filename, index = false, threads=threads, fai=fasta)
     var sequence: string
+    var last_tid = -1
 
     for record in bamfile:
+        if record.tid != last_tid:
+          last_tid = record.tid
+          stderr.write_line "on chrom:", record.chrom
         # NOTE: we may also want to filter record.flag.dup in the future, but
         # that will make results differ between bam and fastq
         if record.flag.secondary or record.flag.supplementary: continue
@@ -56,12 +60,8 @@ proc classify_bam(filename: string, idx: SvIndex, k: int = 25, spacedSeeds: bool
     #echo result
 
 
-proc classify_file*(filename: string, idx: SvIndex, k: int = 25, spacedSeeds: bool = false, space: int = 50): CountTableRef[uint32] =
-    if endsWith(filename, ".bam"):
-        return classify_bam(filename, idx, k, spacedSeeds, space)
+proc classify_file*(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, space: int, fasta:cstring): CountTableRef[uint32] =
+    if endsWith(filename, ".bam") or endsWith(filename, ".cram"):
+        return classify_bam(filename, idx, k, spacedSeeds, space, threads=2, fasta=fasta)
     else:
         quit("Error: only BAM input currently supported.")
-
-proc main_classify*(read_file: string, vcf_file: string, ref_file: string, k: int = 25, flank: int = 100) =
-    var idx: SvIndex = buildSvIndex(ref_file, vcf_file, flank, k)
-    var svCounts: CountTableRef[uint32] = classify_file(read_file, idx, k)

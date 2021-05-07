@@ -37,9 +37,7 @@ proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kme
 
 
     #echo dumpIndexToJson(idx)
-
-
-    let classifyCount = classify_file(reads_fn, idx, kmer_size, spaced_seeds, space)
+    let classifyCount = classify_file(reads_fn, idx, kmer_size, spaced_seeds, space, refseq_fn)
 
     #echo "classifyCount:"
     #echo classifyCount

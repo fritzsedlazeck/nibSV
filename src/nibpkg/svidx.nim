@@ -70,6 +70,7 @@ proc insert*(idx: var SvIndex, sequence: string, k: int, sv_idx: int = -1, space
     if space > 0:
        l = spacing_kmer(l, space)
 
+    doAssert sv_idx >= 0
     # inserting alternates
     if sv_idx >= 0:
         for kmer in l.seeds:
@@ -79,12 +80,6 @@ proc insert*(idx: var SvIndex, sequence: string, k: int, sv_idx: int = -1, space
             idx.counts[kmer.kmer] = kc
 
         return
-
-    # inserting reference counts iff the kmer was already found as alternate.
-    for kmer in l.seeds:
-        # note: sometimes doing double lookup.
-        if kmer.kmer notin idx.counts: continue
-        idx.counts[kmer.kmer].refCount.inc
 
 proc filterRefKmers*(svKmers: var SvIndex, maxRefCount: uint32) =
     ## Remove entries in the SV index that have a ref count higher than specified
