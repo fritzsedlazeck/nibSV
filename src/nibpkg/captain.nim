@@ -8,7 +8,7 @@ import reporter
 from os import nil
 from tables import len
 
-proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kmer_size: int = 25, spaced_seeds : bool = false, space: int = 0, flank: int = 100, maxRefKmerCount : uint32 = 1 ) =
+proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kmer_size: int = 25, spaced_seeds : bool = false, space: int = 0, flank: int = 30, maxRefKmerCount : uint32 = 0 ) =
     ## Generate a SV kmer database, and genotype new samples.
     ## If a file called "{prefix}.sv_kmers.msgpack" exists, use it.
     ## Otherwise, generate it.

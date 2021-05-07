@@ -35,7 +35,7 @@ proc classify_bam(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, spa
     new(result)
 
     var bamfile: Bam
-    open(bamfile, filename, index = false, threads=threads, fai=fasta)
+    doAssert open(bamfile, filename, index = false, threads=threads, fai=fasta)
     var sequence: string
     var last_tid = -1
 
