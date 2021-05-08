@@ -31,7 +31,7 @@ proc buildSvIndex*(reference_path: string, vcf_path: string, flank: int, k: int,
 
     sv_idx.inc
 
-proc classify_bam(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, space: int, threads: int, fasta:cstring): CountTableRef[uint32] =
+proc classify_bam(filename: string, idx: SvIndex, k: int, space: int, threads: int, fasta:cstring): CountTableRef[uint32] =
     new(result)
 
     var bamfile: Bam
@@ -48,20 +48,20 @@ proc classify_bam(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, spa
         if record.flag.secondary or record.flag.supplementary: continue
         record.sequence(sequence)
 
-        var read_classification = process_read(sequence, idx, k, spacedSeeds, space)
+        var read_classification = process_read(sequence, idx, k, space)
 
         #if read_classification.compatible_SVs.len != 0:
         #    echo read_classification
 
-        filter_read_matches(read_classification, winner_takes_all=false)
+        filter_read_matches(read_classification, min_matches=2, winner_takes_all=false)
         for svId, count in read_classification.compatible_SVs:
             result.inc(svId)
 
     #echo result
 
 
-proc classify_file*(filename: string, idx: SvIndex, k: int, spacedSeeds: bool, space: int, fasta:cstring): CountTableRef[uint32] =
+proc classify_file*(filename: string, idx: SvIndex, k: int, space: int, fasta:cstring): CountTableRef[uint32] =
     if endsWith(filename, ".bam") or endsWith(filename, ".cram"):
-        return classify_bam(filename, idx, k, spacedSeeds, space, threads=2, fasta=fasta)
+        return classify_bam(filename, idx, k, space, threads=2, fasta=fasta)
     else:
         quit("Error: only BAM input currently supported.")

@@ -8,22 +8,22 @@ import reporter
 from os import nil
 from tables import len
 
-proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kmer_size: int = 25, spaced_seeds : bool = false, space: int = 0, flank: int = 30, maxRefKmerCount : uint32 = 0 ) =
+proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kmer_size: int = 29, space: int = 0, maxRefKmerCount : uint32 = 0 ) =
     ## Generate a SV kmer database, and genotype new samples.
     ## If a file called "{prefix}.sv_kmers.msgpack" exists, use it.
     ## Otherwise, generate it.
-    var index_fn = "{prefix}.sv_kmers.msgpck".fmt
     var idx: SvIndex
+
+    # flank is just 1 less than kmer size.
+    # for spaced, it's kmer_size + kmersize + spaces - 1
+    let flank = kmer_size + int(space > 0) * (space + kmer_size) - 1
+    var index_fn = "{prefix}.{kmer_size}.{space}.sv_kmers.msgpck".fmt
 
     if not os.fileExists(index_fn):
         echo "building an SV kmer DB."
-        let sp = if spaced_seeds:
-          space
-        else:
-          0
-        idx = buildSvIndex(refSeq_fn, variants_fn, flank, kmer_size, sp)
+        idx = buildSvIndex(refSeq_fn, variants_fn, flank, kmer_size, space)
         echo "updating reference kmer counts."
-        updateSvIndex(refSeq_fn, idx, kmer_size, 1000000, sp)
+        updateSvIndex(refSeq_fn, idx, kmer_size, 10_000_000, space)
         echo "dumpIndexToFile:'", index_fn, "'"
         dumpIndexToFile(idx, index_fn)
     else:
@@ -37,7 +37,7 @@ proc main_runner*(variants_fn, refSeq_fn, reads_fn: string, prefix = "test", kme
 
 
     #echo dumpIndexToJson(idx)
-    let classifyCount = classify_file(reads_fn, idx, kmer_size, spaced_seeds, space, refseq_fn)
+    let classifyCount = classify_file(reads_fn, idx, kmer_size, space, refseq_fn)
 
     #echo "classifyCount:"
     #echo classifyCount

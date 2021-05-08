@@ -7,10 +7,10 @@ type Read* = object
     ## key of svid, count of supporting kmers
     compatible_SVs*: CountTable[uint32]
 
-proc process_read*(s: string, idx: SvIndex, k: int = 25, spacedSeeds: bool = false, space: int = 50): Read =
+proc process_read*(s: string, idx: SvIndex, k: int, space: int): Read =
     # find SVs with kmers intersecting with those from this read.
     var kmers = (cast[Dna](s)).dna_to_kmers(k)
-    if(spacedSeeds):
+    if(space > 0):
         kmers = spacing_kmer(kmers, space)
     for kmer in kmers.seeds:
         var matching_svs = idx.lookupKmer(kmer.kmer)
@@ -18,7 +18,7 @@ proc process_read*(s: string, idx: SvIndex, k: int = 25, spacedSeeds: bool = fal
             result.compatible_SVs.inc(svId)
 
 
-proc filter_read_matches*(read: var Read, min_matches: int = 2, winner_takes_all: bool = false) =
+proc filter_read_matches*(read: var Read, min_matches: int, winner_takes_all: bool) =
     ## track sv with most kmer matches
     var removables: seq[uint32]
     var max_sv = int.high
