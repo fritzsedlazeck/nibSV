@@ -13,4 +13,4 @@ bin           = @["nibsv"]
 
 # Dependencies
 
-requires "nim >= 1.2.0", "hts", "kmer", "bitvector >= 0.4.10", "cligen", "msgpack4nim"
+requires "nim >= 1.2.0", "hts", "kmer", "bitvector >= 0.4.10", "cligen", "msgpack4nim", "argparse == 0.10.1", "https://github.com/brentp/nim-kmer"
