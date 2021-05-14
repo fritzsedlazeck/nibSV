@@ -268,6 +268,7 @@ proc sample_name(ibam:Bam): string =
       for t in l.split('\t'):
         if t.startswith("SM:"):
           return t.split(':')[1]
+  stderr.write_line "[nibsv] no read-groups found, using 'SAMPLE' as sample id"
 
 proc main() =
 
