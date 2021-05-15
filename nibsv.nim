@@ -22,6 +22,7 @@ type Sv* = object
   chrom*: string
   pos*: int # 0-based position
   k: uint8
+  space: uint8
   ref_allele*: string
   alt_allele*: string
   ref_kmers*:seq[uint64]
@@ -65,9 +66,9 @@ proc generate_kmers*(sv:var Sv, fai:Fai) =
   var refs = initHashSet[uint64]()
   var alts = initHashSet[uint64]()
   var refexcl = initHashSet[uint64]()
-  for km in ref_sequence.slide(sv.k.int):
+  for km in ref_sequence.slide_space(sv.k.int, sv.space.uint64):
     refs.incl(km.enc)
-  for km in alt_sequence.slide(sv.k.int):
+  for km in alt_sequence.slide_space(sv.k.int, sv.space.uint64):
     if km.enc in refs:
       # it's not unique to refs so we exclude from there.
       refexcl.incl(km.enc)
@@ -99,7 +100,7 @@ proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: Ha
       else:
         result.alt_kmers.incl(k)
 
-proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
+proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, space:int): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
   # we want to exclude any kmers that are shared between ref and alt
   result.alts_to_exclude = exclude.union(all_ref_kmers.intersection(all_alt_kmers))
   result.refs_to_exclude = result.alts_to_exclude # value semantics so this makes a copy
@@ -107,7 +108,7 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
   # alt kmers that are in the reference and any ref kmers that are in more than
   # once.
   var ref_counts = newTable[uint64, int]()
-  for k in all_ref_kmers: ref_counts[k] = 0
+  for km in all_ref_kmers: ref_counts[km] = 0
 
   stderr.write "[nibsv] "
   let chunk_size = 20_000_000
@@ -120,7 +121,7 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
     for start in countup(0, chrom_len, 20_000_000):
       var start = max(0, start - k + 1) # redo to account for edge effects
       var sequence = fai.get(chrom, start, start + chunk_size)
-      for kmer in sequence.slide(k):
+      for kmer in sequence.slide_space(k, space.uint64):
         if kmer.enc in all_alt_kmers:
           result.alts_to_exclude.incl(kmer.enc)
         # we count every kmer that was one of our possible reference kmers and
@@ -182,6 +183,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
   var kmer_cnts = svs.to_kmer_cnt_table()
   var sequence: string
   var k = svs[0].k.int
+  var space = svs[0].space.uint64
   stderr.write "[nibsv] "
   for tgt in bam.hdr.targets:
     stderr.write tgt.name, " "
@@ -190,7 +192,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
       if aln.flag.supplementary or aln.flag.secondary: continue
       aln.sequence(sequence)
 
-      for km in sequence.slide(k):
+      for km in sequence.slide_space(k, space):
         # we only care about kmers that are in our sv set.
         if km.enc in kmer_cnts:
           kmer_cnts[km.enc] += 1
@@ -273,7 +275,8 @@ proc sample_name(ibam:Bam): string =
 proc main() =
 
   var p = newParser("nibsv"):
-    option("-k", default="31", help="kmer-size")
+    option("-k", default="15", help="kmer-size must be <= 15 if space > 0 else 31")
+    option("--space", default="17", help="space between kmers")
     option("-o", default="nibsv.vcf.gz", help="output vcf")
     arg("vcf", help="SV vcf with sites to genotype")
     arg("bam", help="bam or cram file for sample")
@@ -291,6 +294,7 @@ proc main() =
     quit 0
   var output_vcf = a.o
   let k = parseInt(a.k)
+  let space = parseInt(a.space)
   if k > 31:
     quit "-k must be < 32"
   var ibam:Bam
@@ -311,12 +315,15 @@ proc main() =
 
   stderr.write_line "[nibsv] generating per-sv kmers"
   var svs: seq[Sv]
+  var ml = k + space + int(space > 0) * k
+  echo "ml:", ml
   for v in ivcf:
     #if v.REF.len != 1: continue
-    var sv = Sv(ref_allele:v.REF, alt_allele:v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8)
+    var sv = Sv(ref_allele:v.REF, alt_allele:v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:space.uint8)
+    echo v.ALT[0].len, ",", v.REF.len
 
     # we have to skip bad variants. but leave them in so we keep the order.
-    if v.ALT[0][0] == v.REF[0]:
+    if v.ALT[0][0] == v.REF[0] and (v.ALT[0].len > ml or v.REF.len > ml):
       sv.generate_kmers(fai)
     svs.add(sv)
 
@@ -327,7 +334,7 @@ proc main() =
   var (all_ref_kmers, all_alt_kmers, exclude_kmers) = svs.get_all_kmers()
 
   stderr.write_line "[nibsv] finding kmers in reference in initial Sv set"
-  var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k)
+  var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, space)
 
   all_ref_kmers.clear()
   all_alt_kmers.clear()
