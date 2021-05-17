@@ -33,8 +33,6 @@ type Sv* = object
   ref_counts*: seq[uint32]
   alt_counts*: seq[uint32]
 
-proc stop*(sv:Sv): int {.inline.} =
-  result = sv.pos + sv.ref_allele.len
 
 proc add_set(s:var seq[uint64], vals:HashSet[uint64]) =
   ## efficient add of a set to a seq
@@ -45,23 +43,7 @@ proc add_set(s:var seq[uint64], vals:HashSet[uint64]) =
     s[i] = v
     i.inc
 
-proc generate_kmers*(sv:var Sv, fai:Fai) =
-  var ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.k.int + 1), sv.stop + sv.k.int - 1)
-  when defined(debug):
-    doAssert sv.ref_allele in ref_sequence, $(sv.ref_allele, ref_sequence, sv.ref_allele.len, ref_sequence.len)
-  # TODO AA: this might be .. < sv.k - 1]
-  var alt_sequence = ref_sequence[0 ..< (sv.k - 1)]
-  if sv.ref_allele.len == 1: # INS
-    alt_sequence &= sv.alt_allele
-  else:
-    alt_sequence &= ref_sequence[(sv.k - 1)]
-
-  # TODO AA: this might be .. ^sv.k with above change
-  alt_sequence &= ref_sequence[^(sv.k.int) ..< ^0]
-  when defined(debug):
-    if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
-      doAssert sv.alt_allele in alt_sequence, $(sv.alt_allele, alt_sequence, sv.alt_allele.len, alt_sequence.len, sv)
-
+proc update_kmers(sv:var Sv, ref_sequence:string, alt_sequence:string) =
   # find unique ref and alt kmers.
   var refs = initHashSet[uint64]()
   var alts = initHashSet[uint64]()
@@ -80,6 +62,37 @@ proc generate_kmers*(sv:var Sv, fai:Fai) =
 
   sv.ref_kmers.add_set(refs)
   sv.alt_kmers.add_set(alts)
+
+proc kmer_size(sv:Sv): int =
+  ## size of sequence for kmer, including space
+  return sv.k.int + sv.space.int + int(sv.space > 0) * sv.k.int
+
+proc stop*(sv:Sv): int {.inline.} =
+  result = sv.pos + sv.ref_allele.len
+
+proc generate_ref_alt(sv:var Sv, fai:Fai): tuple[ref_sequence:string, alt_sequence:string] =
+  result.ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.kmer_size + 1), sv.stop + sv.kmer_size - 1)
+  # reference goes back from start:
+  #     k + space + k
+  when defined(debug):
+    doAssert sv.ref_allele in result.ref_sequence, $(sv.ref_allele, result.ref_sequence, sv.ref_allele.len, result.ref_sequence.len)
+  result.alt_sequence = result.ref_sequence[0 ..< (sv.kmer_size - 1)]
+  doAssert sv.ref_allele[0] == result.ref_sequence[(sv.kmer_size - 1)]
+  if sv.ref_allele.len == 1: # INS
+    result.alt_sequence &= sv.alt_allele
+  else:
+    # NOTE: this doesn't work for REF and ALT lengths > 1
+    result.alt_sequence &= result.ref_sequence[sv.kmer_size - 1]
+
+  result.alt_sequence &= result.ref_sequence[^(sv.kmer_size.int) ..< ^0]
+  when defined(debug):
+    if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
+      doAssert sv.alt_allele in result.alt_sequence, $(sv.alt_allele, result.alt_sequence, sv.alt_allele.len, result.alt_sequence.len, sv)
+
+
+proc generate_kmers*(sv:var Sv, fai:Fai) =
+  let (ref_sequence, alt_sequence) = sv.generate_ref_alt(fai)
+  sv.update_kmers(ref_sequence, alt_sequence)
 
 proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: HashSet[uint64], exclude: HashSet[uint64]] =
   # kmers are stored in each sv. we sometimes need them all together.
@@ -276,7 +289,7 @@ proc main() =
 
   var p = newParser("nibsv"):
     option("-k", default="15", help="kmer-size must be <= 15 if space > 0 else 31")
-    option("--space", default="17", help="space between kmers")
+    option("--space", default="11", help="space between kmers")
     option("-o", default="nibsv.vcf.gz", help="output vcf")
     arg("vcf", help="SV vcf with sites to genotype")
     arg("bam", help="bam or cram file for sample")
@@ -316,24 +329,25 @@ proc main() =
   stderr.write_line "[nibsv] generating per-sv kmers"
   var svs: seq[Sv]
   var ml = k + space + int(space > 0) * k
-  echo "ml:", ml
   for v in ivcf:
+    #if v.FILTER notin ["PASS", "LongReadHomRef"]: continue
     #if v.REF.len != 1: continue
-    var sv = Sv(ref_allele:v.REF, alt_allele:v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:space.uint8)
-    echo v.ALT[0].len, ",", v.REF.len
+    var sv = Sv(ref_allele: $v.REF, alt_allele: $v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:space.uint8)
 
     # we have to skip bad variants. but leave them in so we keep the order.
-    if v.ALT[0][0] == v.REF[0] and (v.ALT[0].len > ml or v.REF.len > ml):
+    if v.ALT[0][0] == v.REF[0]: # and (v.ALT[0].len > ml or v.REF.len > ml):
       sv.generate_kmers(fai)
     svs.add(sv)
 
   ivcf.close()
 
+  var bstats = svs.stats()
+  stderr.write_line "[nibsv] before stats:", bstats
   # get all kmers we've identified across break-points
   stderr.write_line "[nibsv] merging per-sv kmers to single set"
   var (all_ref_kmers, all_alt_kmers, exclude_kmers) = svs.get_all_kmers()
 
-  stderr.write_line "[nibsv] finding kmers in reference in initial Sv set"
+  stderr.write_line "[nibsv] finding kmers in reference in initial Sv set:"
   var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, space)
 
   all_ref_kmers.clear()
