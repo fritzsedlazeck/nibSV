@@ -310,6 +310,9 @@ proc main() =
   let space = parseInt(a.space)
   if k > 31:
     quit "-k must be < 32"
+  if space > 0:
+    if k > 16:
+      quit "-k must be < 16 when space is > 0"
   var ibam:Bam
   if not ibam.open(a.bam, threads=2, fai=a.ref, index=true):
     quit &"[nibsv] couldn't open cram file:{a.bam}"
