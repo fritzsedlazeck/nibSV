@@ -70,7 +70,7 @@ proc kmer_size(sv:Sv): int =
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
-proc generate_ref_alt(sv:var Sv, fai:Fai): tuple[ref_sequence:string, alt_sequence:string] =
+proc generate_ref_alt*(sv:var Sv, fai:Fai): tuple[ref_sequence:string, alt_sequence:string] =
   result.ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.kmer_size + 1), sv.stop + sv.kmer_size - 1)
   # reference goes back from start:
   #     k + space + k
@@ -287,6 +287,9 @@ proc sample_name(ibam:Bam): string =
 
 proc main() =
 
+  when not defined(danger):
+    stderr.write_line "[nibsv] WARNING: nibsv compiled without optimizations; will be slow"
+
   var p = newParser("nibsv"):
     option("-k", default="15", help="kmer-size must be <= 15 if space > 0 else 31")
     option("--space", default="11", help="space between kmers")
@@ -311,7 +314,7 @@ proc main() =
   if k > 31:
     quit "-k must be < 32"
   if space > 0:
-    if k > 16:
+    if k >= 16:
       quit "-k must be < 16 when space is > 0"
   var ibam:Bam
   if not ibam.open(a.bam, threads=2, fai=a.ref, index=true):
