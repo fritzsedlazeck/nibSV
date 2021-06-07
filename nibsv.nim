@@ -113,6 +113,7 @@ proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: Ha
       else:
         result.alt_kmers.incl(k)
 
+{.push optimization: speed, checks: off.}
 proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, space:int): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
   # we want to exclude any kmers that are shared between ref and alt
   result.alts_to_exclude = exclude.union(all_ref_kmers.intersection(all_alt_kmers))
@@ -145,6 +146,7 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
   for k, cnt in ref_counts:
     if cnt > 1: result.refs_to_exclude.incl(k)
   stderr.write_line ""
+{.pop.}
 
 proc remove(kmers:var seq[uint64], excludes:var HashSet[uint64]) =
   var excluded = 0
@@ -190,6 +192,7 @@ proc to_kmer_cnt_table(svs: seq[Sv]): TableRef[uint64, int] =
         doAssert k notin result
       result[k] = 0
 
+{.push optimization: speed, checks: off.}
 proc count(svs:var seq[Sv], bam:Bam) =
 
   # kmer => count
@@ -209,6 +212,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
         # we only care about kmers that are in our sv set.
         if km.enc in kmer_cnts:
           kmer_cnts[km.enc] += 1
+
   stderr.write_line ""
 
   # transfer counts from single, global table back to per-variant counts.
@@ -217,6 +221,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
       sv.ref_counts.add(kmer_cnts[k].uint32)
     for k in sv.alt_kmers:
       sv.alt_counts.add(kmer_cnts[k].uint32)
+{.pop.}
 
 proc check_unique_kmers(svs: seq[Sv]) =
   # this is just an internal debugging function that checks assumptions
@@ -239,6 +244,21 @@ type Stat = object
 
 import hts/private/hts_concat
 
+proc argmax(a:seq[uint32]): int =
+  if len(a) == 0: return -1
+  result = 0
+  var m = a[0]
+  for i, v in a:
+    if v > m:
+      result = i
+      m = v
+
+proc get_max_kmer(cnts:seq[uint32], kmers:seq[uint64], k:int): string =
+  if kmers.len == 0: return ""
+  var km = kmers[cnts.argmax]
+  result = newString(k)
+  km.decode(result)
+
 proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
   ## write an output vcf with the counts.
   var ovcf:VCF
@@ -247,7 +267,9 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
   ovcf.copy_header(ivcf.header)
   discard ovcf.header.hdr.bcf_hdr_set_samples(nil, 0)
   discard ovcf.header.add_format("NIR", "1", "Integer", "nibsv: max reference counts. a value of -1 means that there were no suitable ref kmers for this sv")
+  discard ovcf.header.add_format("NIRK", "1", "String", "nibsv: reference kmer (this and reverse-complement are used)")
   discard ovcf.header.add_format("NIA", "1", "Integer", "nibsv: max alternate counts. a value of -1 means that there were no suitable alt kmers for this sv")
+  discard ovcf.header.add_format("NIAK", "1", "String", "nibsv: alternate kmer (this and reverse-complement are used)")
   ovcf.add_sample(sample_name)
   doAssert ovcf.write_header()
 
@@ -257,8 +279,14 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
     let sv = svs[i]
     var max_ref = if sv.ref_counts.len > 0: @[sv.ref_counts.max.int32] else: @[-1'i32]
     doAssert variant.format.set("NIR", max_ref) == Status.OK
+    var kms = @[sv.ref_counts.get_max_kmer(sv.ref_kmers, sv.k.int)]
+    doAssert variant.format.set("NIRK", kms) == Status.OK
+
     var max_alt = if sv.alt_counts.len > 0: @[sv.alt_counts.max.int32] else: @[-1'i32]
     doAssert variant.format.set("NIA", max_alt) == Status.OK
+
+    kms = @[sv.alt_counts.get_max_kmer(sv.alt_kmers, sv.k.int)]
+    doAssert variant.format.set("NIAK", kms) == Status.OK
     doAssert ovcf.write_variant(variant)
     i.inc
   doAssert i == svs.len
