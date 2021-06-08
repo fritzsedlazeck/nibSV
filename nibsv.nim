@@ -266,10 +266,10 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
     quit &"couldn't open output vcf: {output_path}"
   ovcf.copy_header(ivcf.header)
   discard ovcf.header.hdr.bcf_hdr_set_samples(nil, 0)
-  discard ovcf.header.add_format("NIR", "1", "Integer", "nibsv: max reference counts. a value of -1 means that there were no suitable ref kmers for this sv")
   discard ovcf.header.add_format("NIRK", "1", "String", "nibsv: reference kmer (this and reverse-complement are used)")
-  discard ovcf.header.add_format("NIA", "1", "Integer", "nibsv: max alternate counts. a value of -1 means that there were no suitable alt kmers for this sv")
   discard ovcf.header.add_format("NIAK", "1", "String", "nibsv: alternate kmer (this and reverse-complement are used)")
+  discard ovcf.header.add_format("NIR", "1", "Integer", "nibsv: max reference counts. a value of -1 means that there were no suitable ref kmers for this sv")
+  discard ovcf.header.add_format("NIA", "1", "Integer", "nibsv: max alternate counts. a value of -1 means that there were no suitable alt kmers for this sv")
   ovcf.add_sample(sample_name)
   doAssert ovcf.write_header()
 
@@ -277,16 +277,19 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
   for variant in ivcf:
     variant.vcf = ovcf
     let sv = svs[i]
+    var kms = @[sv.ref_counts.get_max_kmer(sv.ref_kmers, sv.k.int)]
     var max_ref = if sv.ref_counts.len > 0: @[sv.ref_counts.max.int32] else: @[-1'i32]
     doAssert variant.format.set("NIR", max_ref) == Status.OK
-    var kms = @[sv.ref_counts.get_max_kmer(sv.ref_kmers, sv.k.int)]
-    doAssert variant.format.set("NIRK", kms) == Status.OK
+    if kms[0] != "":
+      doAssert variant.format.set("NIRK", kms) == Status.OK
 
+    kms = @[sv.alt_counts.get_max_kmer(sv.alt_kmers, sv.k.int)]
     var max_alt = if sv.alt_counts.len > 0: @[sv.alt_counts.max.int32] else: @[-1'i32]
     doAssert variant.format.set("NIA", max_alt) == Status.OK
 
-    kms = @[sv.alt_counts.get_max_kmer(sv.alt_kmers, sv.k.int)]
-    doAssert variant.format.set("NIAK", kms) == Status.OK
+    if kms[0] != "":
+      doAssert variant.format.set("NIAK", kms) == Status.OK
+
     doAssert ovcf.write_variant(variant)
     i.inc
   doAssert i == svs.len
