@@ -70,21 +70,23 @@ proc kmer_size(sv:Sv): int =
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
-proc generate_ref_alt*(sv:var Sv, fai:Fai): tuple[ref_sequence:string, alt_sequence:string] =
-  result.ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.kmer_size + 1), sv.stop + sv.kmer_size - 1)
+proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:string, alt_sequence:string] =
+  let overlap = overlap.int
+  result.ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.kmer_size + overlap), sv.stop + sv.kmer_size - overlap)
   # reference goes back from start:
   #     k + space + k
   when defined(debug):
     doAssert sv.ref_allele in result.ref_sequence, $(sv.ref_allele, result.ref_sequence, sv.ref_allele.len, result.ref_sequence.len)
-  result.alt_sequence = result.ref_sequence[0 ..< (sv.kmer_size - 1)]
-  doAssert sv.ref_allele[0] == result.ref_sequence[(sv.kmer_size - 1)]
+
+  result.alt_sequence = result.ref_sequence[0 ..< (sv.kmer_size - overlap)]
+  doAssert sv.ref_allele[0] == result.ref_sequence[(sv.kmer_size - overlap)]
   if sv.ref_allele.len == 1: # INS
     result.alt_sequence &= sv.alt_allele
   else:
     # NOTE: this doesn't work for REF and ALT lengths > 1
-    result.alt_sequence &= result.ref_sequence[sv.kmer_size - 1]
+    result.alt_sequence &= result.ref_sequence[sv.kmer_size - overlap]
 
-  result.alt_sequence &= result.ref_sequence[^(sv.kmer_size.int) ..< ^0]
+  result.alt_sequence &= result.ref_sequence[^(sv.kmer_size.int - overlap + 1) ..< ^(overlap - 1)]
   when defined(debug):
     if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
       doAssert sv.alt_allele in result.alt_sequence, $(sv.alt_allele, result.alt_sequence, sv.alt_allele.len, result.alt_sequence.len, sv)
@@ -244,22 +246,25 @@ type Stat = object
 
 import hts/private/hts_concat
 
-proc argmax(a:seq[uint32]): int =
+proc argmax(a:seq[uint32], maxval:uint32): int =
   if len(a) == 0: return -1
-  result = 0
-  var m = a[0]
+  result = -1
+  var m = -1
+  if a[0] <= maxval:
+      m = a[0].int
+      result = 0
   for i, v in a:
-    if v > m:
+    if v.int > m and v <= maxval:
       result = i
-      m = v
+      m = v.int
 
-proc get_max_kmer(cnts:seq[uint32], kmers:seq[uint64], k:int): string =
-  if kmers.len == 0: return ""
-  var km = kmers[cnts.argmax]
+proc get_max_kmer(kmers:seq[uint64], k:int, idx:int): string =
+  if kmers.len == 0 or idx < 0: return ""
+  var km = kmers[idx]
   result = newString(k)
   km.decode(result)
 
-proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
+proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxval:uint32) =
   ## write an output vcf with the counts.
   var ovcf:VCF
   if not ovcf.open(output_path, mode="w"):
@@ -277,14 +282,16 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string) =
   for variant in ivcf:
     variant.vcf = ovcf
     let sv = svs[i]
-    var kms = @[sv.ref_counts.get_max_kmer(sv.ref_kmers, sv.k.int)]
-    var max_ref = if sv.ref_counts.len > 0: @[sv.ref_counts.max.int32] else: @[-1'i32]
+    let ref_max = sv.ref_counts.argmax(maxval=maxval)
+    var kms = @[get_max_kmer(sv.ref_kmers, sv.k.int, ref_max)]
+    var max_ref = if sv.ref_counts.len > 0 and ref_max >= 0: @[sv.ref_counts[ref_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIR", max_ref) == Status.OK
     if kms[0] != "":
       doAssert variant.format.set("NIRK", kms) == Status.OK
 
-    kms = @[sv.alt_counts.get_max_kmer(sv.alt_kmers, sv.k.int)]
-    var max_alt = if sv.alt_counts.len > 0: @[sv.alt_counts.max.int32] else: @[-1'i32]
+    let alt_max = sv.alt_counts.argmax(maxval=maxval)
+    kms = @[get_max_kmer(sv.alt_kmers, sv.k.int, alt_max)]
+    var max_alt = if sv.alt_counts.len > 0 and alt_max >= 0: @[sv.alt_counts[alt_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIA", max_alt) == Status.OK
 
     if kms[0] != "":
@@ -329,6 +336,7 @@ proc main() =
     arg("bam", help="bam or cram file for sample")
     arg("ref", help="reference fasta file")
 
+  let maxval = 500'u32 # TODO: make this a parameter
   try:
     var a = p.parse()
   except UsageError as e:
@@ -417,7 +425,7 @@ proc main() =
   if not ivcf.open(a.vcf, threads=2):
     quit &"[nibsv] couldn't open vcf file:{a.vcf}"
 
-  svs.write(ivcf, output_vcf, ibam.sample_name)
+  svs.write(ivcf, output_vcf, ibam.sample_name, maxval)
   stderr.write_line &"[nibsv] wrote: {svs.len} variants to {output_vcf}"
   ivcf.close()
 
