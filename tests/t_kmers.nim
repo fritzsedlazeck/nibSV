@@ -17,7 +17,9 @@ suite "kmers":
         check kmers.bin_to_dna(0b10001111000100, 7, kmers.reverse) == "TGTAATC"
 
     test "dna_to_kmers":
-        check kmers.dna_to_kmers("AAAA", 2).seeds.len() == 6
+        check kmers.get_dnas(kmers.dna_to_kmers("ACGT", 2)) == @["AC", "AC", "CG", "CG", "GT", "GT"]
+        check kmers.get_dnas(kmers.dna_to_kmers("NCGT", 2)) == @["CG", "CG", "GT", "GT"]
+        check kmers.get_dnas(kmers.dna_to_kmers("ANGT", 2)) == @["GT", "GT"]
 
     test "sorted_kmers":
         let
