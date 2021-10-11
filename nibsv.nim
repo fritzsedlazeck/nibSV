@@ -140,8 +140,8 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
   # now we want to iterate over the entire reference genome and exclude any
   # alt kmers that are in the reference and any ref kmers that are in more than
   # once.
-  var ref_counts = newTable[uint64, uint32](all_ref_kmers.len)
-  for km in all_ref_kmers: ref_counts[km] = 0'u32
+  var ref_counts = newTable[uint64, uint8](all_ref_kmers.len)
+  for km in all_ref_kmers: ref_counts[km] = 0'u8
 
   stderr.write "[nibsv] "
   let chunk_size = 20_000_000
@@ -160,11 +160,13 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
             result.alts_to_exclude.incl(kmer.enc)
           # we count every kmer that was one of our possible reference kmers and
           # we check that it's only seen once below
-          if kmer.enc in ref_counts:
+          # if it's 2, we already know we can exclude and if it's not in the
+          # table (default of 2, we can also skip)
+          if ref_counts.getOrDefault(kmer.enc, 2'u8) != 2'u8:
             ref_counts[kmer.enc].inc
   # now exclude any ref with a count > 1 as not unique.
   for k, cnt in ref_counts:
-    if cnt > 1'u32: result.refs_to_exclude.incl(k)
+    if cnt == 2'u8: result.refs_to_exclude.incl(k)
   stderr.write_line ""
 {.pop.}
 
