@@ -18,6 +18,9 @@ steps:
 ]#
 
 
+const nibsvVersion* = "0.0.2"
+const nibsvGitCommit* = staticExec("git rev-parse --verify HEAD")
+
 type Sv* = object
   chrom*: string
   pos*: int # 0-based position
@@ -328,10 +331,13 @@ proc main() =
   when not defined(danger):
     stderr.write_line "[nibsv] WARNING: nibsv compiled without optimizations; will be slow"
 
+  stderr.write_line &"[nibsv] version: {nibsvVersion} commit: {nibsvGitCommit}"
+
   var p = newParser("nibsv"):
     option("-k", default="15", help="kmer-size must be <= 15 if space > 0 else 31")
     option("--space", default="11", help="space between kmers")
     option("-o", default="nibsv.vcf.gz", help="output vcf")
+    option("--cram-ref", help="optional reference fasta file for cram if difference from reference fasta")
     arg("vcf", help="SV vcf with sites to genotype")
     arg("bam", help="bam or cram file for sample")
     arg("ref", help="reference fasta file")
@@ -356,7 +362,9 @@ proc main() =
     if k >= 16:
       quit "-k must be < 16 when space is > 0"
   var ibam:Bam
-  if not ibam.open(a.bam, threads=2, fai=a.ref, index=true):
+  if a.cram_ref == "":
+    a.cram_ref = a.ref
+  if not ibam.open(a.bam, threads=2, fai=a.cram_ref, index=true):
     quit &"[nibsv] couldn't open cram file:{a.bam}"
   # options to do less work on cram decoding. we only need sequence and flag.
   var opts = SamField.SAM_FLAG.int or SamField.SAM_RNAME.int or SamField.SAM_POS.int or SamField.SAM_SEQ.int
