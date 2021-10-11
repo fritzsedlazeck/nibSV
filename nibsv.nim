@@ -434,7 +434,7 @@ proc main() =
   if not ivcf.open(a.vcf, threads=2):
     quit &"[nibsv] couldn't open vcf file:{a.vcf}"
 
-  if ivcf.header.add_string("##nibsv-info=\"version:{nibsvVersion} commit:{nibsvCommit} k:{a.k} space:{a.space} ref:{a.ref} cram_ref:{a.cram_ref}\"") != Status.OK:
+  if ivcf.header.add_string(&"##nibsv-info=\"version:{nibsvVersion} commit:{nibsvGitCommit} k:{a.k} space:{a.space} ref:{a.ref} cram_ref:{a.cram_ref}\"") != Status.OK:
     stderr.write_line "[nibsv] warning! couldn't add nibsv-info to the header of output vcf"
 
   svs.write(ivcf, output_vcf, ibam.sample_name, maxval)
