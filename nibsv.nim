@@ -25,7 +25,7 @@ type Sv* = object
   chrom*: string
   pos*: int # 0-based position
   k: uint8
-  space: uint8
+  space: seq[uint8]
   ref_allele*: string
   alt_allele*: string
   ref_kmers*:seq[uint64]
@@ -39,9 +39,9 @@ type Sv* = object
 
 proc add_set(s:var seq[uint64], vals:HashSet[uint64]) =
   ## efficient add of a set to a seq
-  doAssert s.len == 0
-  s.setLen(vals.len)
-  var i = 0
+  #doAssert s.len == 0
+  var i = s.len
+  s.setLen(s.len + vals.len)
   for v in vals:
     s[i] = v
     i.inc
@@ -51,14 +51,15 @@ proc update_kmers(sv:var Sv, ref_sequence:string, alt_sequence:string) =
   var refs = initHashSet[uint64]()
   var alts = initHashSet[uint64]()
   var refexcl = initHashSet[uint64]()
-  for km in ref_sequence.slide_space(sv.k.int, sv.space.uint64):
-    refs.incl(km.enc)
-  for km in alt_sequence.slide_space(sv.k.int, sv.space.uint64):
-    if km.enc in refs:
-      # it's not unique to refs so we exclude from there.
-      refexcl.incl(km.enc)
-      continue
-    alts.incl(km.enc)
+  for space in sv.space:
+    for km in ref_sequence.slide_space(sv.k.int, space.uint64):
+      refs.incl(km.enc)
+    for km in alt_sequence.slide_space(sv.k.int, space.uint64):
+      if km.enc in refs:
+        # it's not unique to refs so we exclude from there.
+        refexcl.incl(km.enc)
+        continue
+      alts.incl(km.enc)
 
   for km in refexcl:
     refs.excl(km)
@@ -66,38 +67,43 @@ proc update_kmers(sv:var Sv, ref_sequence:string, alt_sequence:string) =
   sv.ref_kmers.add_set(refs)
   sv.alt_kmers.add_set(alts)
 
-proc kmer_size(sv:Sv): int =
+proc kmer_size(sv:Sv): seq[int] =
   ## size of sequence for kmer, including space
-  return sv.k.int + sv.space.int + int(sv.space > 0) * sv.k.int
+  for s in sv.space:
+    result.add(sv.k.int + s.int + int(s > 0) * sv.k.int)
+  if result.len == 0: result.add(sv.k.int)
 
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
-proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:string, alt_sequence:string] =
+proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:seq[string], alt_sequence:seq[string]] =
   let overlap = overlap.int
-  result.ref_sequence = fai.get(sv.chrom, max(0, sv.pos - sv.kmer_size + overlap), sv.stop + sv.kmer_size - overlap)
-  # reference goes back from start:
-  #     k + space + k
-  when defined(debug):
-    doAssert sv.ref_allele in result.ref_sequence, $(sv.ref_allele, result.ref_sequence, sv.ref_allele.len, result.ref_sequence.len)
 
-  result.alt_sequence = result.ref_sequence[0 ..< (sv.kmer_size - overlap)]
-  doAssert sv.ref_allele[0] == result.ref_sequence[(sv.kmer_size - overlap)]
-  if sv.ref_allele.len == 1: # INS
-    result.alt_sequence &= sv.alt_allele
-  else:
+  for i, kmer_size in sv.kmer_size:
+    result.ref_sequence.add( fai.get(sv.chrom, max(0, sv.pos - kmer_size + overlap), sv.stop + kmer_size - overlap))
+    # reference goes back from start:
+    #     k + space + k
+    when defined(debug):
+      doAssert sv.ref_allele in result.ref_sequence[i], $(sv.ref_allele, result.ref_sequence, sv.ref_allele.len, result.ref_sequence.len)
+
+    result.alt_sequence.add(result.ref_sequence[i][0 ..< (kmer_size - overlap)])
+    doAssert sv.ref_allele[0] == result.ref_sequence[i][(kmer_size - overlap)]
+    if sv.ref_allele.len == 1: # INS
+      result.alt_sequence[i] &= sv.alt_allele
+    else:
     # NOTE: this doesn't work for REF and ALT lengths > 1
-    result.alt_sequence &= result.ref_sequence[sv.kmer_size - overlap]
+      result.alt_sequence[i] &= result.ref_sequence[i][kmer_size - overlap]
 
-  result.alt_sequence &= result.ref_sequence[^(sv.kmer_size.int - overlap + 1) ..< ^(overlap - 1)]
-  when defined(debug):
-    if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
-      doAssert sv.alt_allele in result.alt_sequence, $(sv.alt_allele, result.alt_sequence, sv.alt_allele.len, result.alt_sequence.len, sv)
+    result.alt_sequence[i] &= result.ref_sequence[i][^(kmer_size.int - overlap + 1) ..< ^(overlap - 1)]
+    when defined(debug):
+      if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
+        doAssert sv.alt_allele in result.alt_sequence[i], $(sv.alt_allele, result.alt_sequence, sv.alt_allele.len, result.alt_sequence.len, sv)
 
 
 proc generate_kmers*(sv:var Sv, fai:Fai) =
   let (ref_sequence, alt_sequence) = sv.generate_ref_alt(fai)
-  sv.update_kmers(ref_sequence, alt_sequence)
+  for i, rs in ref_sequence:
+    sv.update_kmers(rs, alt_sequence[i])
 
 proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: HashSet[uint64], exclude: HashSet[uint64]] =
   # kmers are stored in each sv. we sometimes need them all together.
@@ -119,7 +125,7 @@ proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: Ha
         result.alt_kmers.incl(k)
 
 {.push optimization: speed, checks: off.}
-proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, space:int): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
+proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, spaces:seq[uint8]): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
   # we want to exclude any kmers that are shared between ref and alt
   result.alts_to_exclude = exclude.union(all_ref_kmers.intersection(all_alt_kmers))
   result.refs_to_exclude = result.alts_to_exclude # value semantics so this makes a copy
@@ -140,13 +146,14 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
     for start in countup(0, chrom_len, 20_000_000):
       var start = max(0, start - k + 1) # redo to account for edge effects
       var sequence = fai.get(chrom, start, start + chunk_size)
-      for kmer in sequence.slide_space(k, space.uint64):
-        if kmer.enc in all_alt_kmers:
-          result.alts_to_exclude.incl(kmer.enc)
-        # we count every kmer that was one of our possible reference kmers and
-        # we check that it's only seen once below
-        if kmer.enc in ref_counts:
-          ref_counts[kmer.enc].inc
+      for space in spaces:
+        for kmer in sequence.slide_space(k, space.uint64):
+          if kmer.enc in all_alt_kmers:
+            result.alts_to_exclude.incl(kmer.enc)
+          # we count every kmer that was one of our possible reference kmers and
+          # we check that it's only seen once below
+          if kmer.enc in ref_counts:
+            ref_counts[kmer.enc].inc
   # now exclude any ref with a count > 1 as not unique.
   for k, cnt in ref_counts:
     if cnt > 1: result.refs_to_exclude.incl(k)
@@ -204,7 +211,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
   var kmer_cnts = svs.to_kmer_cnt_table()
   var sequence: string
   var k = svs[0].k.int
-  var space = svs[0].space.uint64
+  var spaces = svs[0].space
   stderr.write "[nibsv] "
   for tgt in bam.hdr.targets:
     stderr.write tgt.name, " "
@@ -213,10 +220,11 @@ proc count(svs:var seq[Sv], bam:Bam) =
       if aln.flag.supplementary or aln.flag.secondary: continue
       aln.sequence(sequence)
 
-      for km in sequence.slide_space(k, space):
-        # we only care about kmers that are in our sv set.
-        if km.enc in kmer_cnts:
-          kmer_cnts[km.enc] += 1
+      for space in spaces:
+        for km in sequence.slide_space(k, space.uint64):
+          # we only care about kmers that are in our sv set.
+          if km.enc in kmer_cnts:
+            kmer_cnts[km.enc] += 1
 
   stderr.write_line ""
 
@@ -335,8 +343,8 @@ proc main() =
   stderr.write_line &"[nibsv] version: {nibsvVersion} commit: {nibsvGitCommit}"
 
   var p = newParser("nibsv"):
-    option("-k", default="15", help="kmer-size must be <= 15 if space > 0 else 31")
-    option("--space", default="11", help="space between kmers")
+    option("-k", default="27", help="kmer-size must be <= 15 if space > 0 else 31")
+    option("--space", default="", help="space between kmers", multiple=true)
     option("-o", default="nibsv.vcf.gz", help="output vcf")
     option("--cram-ref", help="optional reference fasta file for cram if difference from reference fasta")
     arg("vcf", help="SV vcf with sites to genotype")
@@ -356,12 +364,18 @@ proc main() =
     quit 0
   var output_vcf = a.o
   let k = parseInt(a.k)
-  let space = parseInt(a.space)
   if k > 31:
     quit "-k must be < 32"
-  if space > 0:
-    if k >= 16:
-      quit "-k must be < 16 when space is > 0"
+  var spaces = newSeqOfCap[uint8](a.space.len)
+  for sp in a.space:
+    let space = parseInt(sp)
+    if space > uint8.high.int:
+      quit "--space must be < 256"
+    if space > 0:
+      if k >= 16:
+        quit "-k must be < 16 when space is > 0"
+    spaces.add(space.uint8)
+  if spaces.len == 0: spaces.add(0'u8)
   var ibam:Bam
   if a.cram_ref == "":
     a.cram_ref = a.ref
@@ -382,11 +396,10 @@ proc main() =
 
   stderr.write_line "[nibsv] generating per-sv kmers"
   var svs: seq[Sv]
-  var ml = k + space + int(space > 0) * k
   for v in ivcf:
     #if v.FILTER notin ["PASS", "LongReadHomRef"]: continue
     #if v.REF.len != 1: continue
-    var sv = Sv(ref_allele: $v.REF, alt_allele: $v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:space.uint8)
+    var sv = Sv(ref_allele: $v.REF, alt_allele: $v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:spaces)
 
     # we have to skip bad variants. but leave them in so we keep the order.
     if v.ALT[0][0] == v.REF[0]: # and (v.ALT[0].len > ml or v.REF.len > ml):
@@ -402,7 +415,7 @@ proc main() =
   var (all_ref_kmers, all_alt_kmers, exclude_kmers) = svs.get_all_kmers()
 
   stderr.write_line "[nibsv] finding kmers in reference in initial Sv set:"
-  var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, space)
+  var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, spaces)
 
   all_ref_kmers.clear()
   all_alt_kmers.clear()
