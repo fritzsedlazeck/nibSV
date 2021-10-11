@@ -39,27 +39,35 @@ type Sv* = object
 
 proc add_set(s:var seq[uint64], vals:HashSet[uint64]) =
   ## efficient add of a set to a seq
-  #doAssert s.len == 0
+  doAssert s.len == 0
   var i = s.len
   s.setLen(s.len + vals.len)
   for v in vals:
     s[i] = v
     i.inc
 
-proc update_kmers(sv:var Sv, ref_sequence:string, alt_sequence:string) =
+proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string], step:int) =
   # find unique ref and alt kmers.
   var refs = initHashSet[uint64]()
   var alts = initHashSet[uint64]()
   var refexcl = initHashSet[uint64]()
-  for space in sv.space:
-    for km in ref_sequence.slide_space(sv.k.int, space.uint64):
-      refs.incl(km.enc)
-    for km in alt_sequence.slide_space(sv.k.int, space.uint64):
-      if km.enc in refs:
-        # it's not unique to refs so we exclude from there.
-        refexcl.incl(km.enc)
-        continue
-      alts.incl(km.enc)
+
+  for ref_sequence in ref_sequences:
+    #if ref_sequence.len > 1000: stderr.write $sv & " +"
+    for space in sv.space:
+      for km in ref_sequence.slide_space(sv.k.int, space.uint64):
+        # given a reference sequence (in a DEL) of 1000 bases, we don't need to
+        # generate+save every possible kmer.
+        refs.incl(km.enc)
+
+  for alt_sequence in alt_sequences:
+    for space in sv.space:
+      for km in alt_sequence.slide_space(sv.k.int, space.uint64):
+        if km.enc in refs:
+          # it's not unique to refs so we exclude from there.
+          refexcl.incl(km.enc)
+          continue
+        alts.incl(km.enc)
 
   for km in refexcl:
     refs.excl(km)
@@ -100,10 +108,9 @@ proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:
         doAssert sv.alt_allele in result.alt_sequence[i], $(sv.alt_allele, result.alt_sequence, sv.alt_allele.len, result.alt_sequence.len, sv)
 
 
-proc generate_kmers*(sv:var Sv, fai:Fai) =
-  let (ref_sequence, alt_sequence) = sv.generate_ref_alt(fai)
-  for i, rs in ref_sequence:
-    sv.update_kmers(rs, alt_sequence[i])
+proc generate_kmers*(sv:var Sv, fai:Fai, step:int) =
+  let (ref_sequences, alt_sequences) = sv.generate_ref_alt(fai)
+  sv.update_kmers(ref_sequences, alt_sequences, step)
 
 proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: HashSet[uint64], exclude: HashSet[uint64]] =
   # kmers are stored in each sv. we sometimes need them all together.
@@ -128,6 +135,7 @@ proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: Ha
 proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, spaces:seq[uint8]): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
   # we want to exclude any kmers that are shared between ref and alt
   result.alts_to_exclude = exclude.union(all_ref_kmers.intersection(all_alt_kmers))
+  exclude.clear()
   result.refs_to_exclude = result.alts_to_exclude # value semantics so this makes a copy
   # now we want to iterate over the entire reference genome and exclude any
   # alt kmers that are in the reference and any ref kmers that are in more than
@@ -185,12 +193,12 @@ proc remove(kmers:var seq[uint64], excludes:var HashSet[uint64]) =
     kmers = keep
    ]#
 
-proc remove_reference_kmers(svs:var seq[Sv], refs_to_exclude:var HashSet[uint64], alts_to_exclude:var HashSet[uint64]) =
+proc remove_reference_kmers(svs:var seq[Sv], ex:var tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude:HashSet[uint64]]) =
   # now go back through svs and update each to remove any kmers that were 
   # present in reference or presnt > 1 time for refs
   for sv in svs.mitems:
-    sv.ref_kmers.remove(refs_to_exclude)
-    sv.alt_kmers.remove(alts_to_exclude)
+    sv.ref_kmers.remove(ex.refs_to_exclude)
+    sv.alt_kmers.remove(ex.alts_to_exclude)
 
 proc to_kmer_cnt_table(svs: seq[Sv]): TableRef[uint64, int] =
   result = newTable[uint64, int]()
@@ -345,6 +353,7 @@ proc main() =
   var p = newParser("nibsv"):
     option("-k", default="27", help="kmer-size must be <= 15 if space > 0 else 31")
     option("--space", default="", help="space between kmers", multiple=true)
+    option("--step", default="1", help="step between generated reference kmers (larger values save more memory)")
     option("-o", default="nibsv.vcf.gz", help="output vcf")
     option("--cram-ref", help="optional reference fasta file for cram if difference from reference fasta")
     arg("vcf", help="SV vcf with sites to genotype")
@@ -377,6 +386,7 @@ proc main() =
     spaces.add(space.uint8)
   if spaces.len == 0: spaces.add(0'u8)
   var ibam:Bam
+  let step = parseInt(a.step)
   if a.cram_ref == "":
     a.cram_ref = a.ref
   if not ibam.open(a.bam, threads=2, fai=a.cram_ref, index=true):
@@ -403,7 +413,7 @@ proc main() =
 
     # we have to skip bad variants. but leave them in so we keep the order.
     if v.ALT[0][0] == v.REF[0]: # and (v.ALT[0].len > ml or v.REF.len > ml):
-      sv.generate_kmers(fai)
+      sv.generate_kmers(fai, step)
     svs.add(sv)
 
   ivcf.close()
@@ -415,7 +425,7 @@ proc main() =
   var (all_ref_kmers, all_alt_kmers, exclude_kmers) = svs.get_all_kmers()
 
   stderr.write_line "[nibsv] finding kmers in reference in initial Sv set:"
-  var (refs_to_exclude, alts_to_exclude) = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, spaces)
+  var ex = fai.get_exclude(all_ref_kmers, all_alt_kmers, exclude_kmers, k, spaces)
 
   all_ref_kmers.clear()
   all_alt_kmers.clear()
@@ -423,10 +433,10 @@ proc main() =
   GC_fullCollect()
 
   stderr.write_line "[nibsv] removing reference kmers from sv sets"
-  svs.remove_reference_kmers(refs_to_exclude, alts_to_exclude)
+  svs.remove_reference_kmers(ex)
 
-  refs_to_exclude.clear()
-  alts_to_exclude.clear()
+  ex.refs_to_exclude.clear()
+  ex.alts_to_exclude.clear()
   GC_fullCollect()
 
 
