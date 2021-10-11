@@ -152,8 +152,8 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
 
     ##  lk is the length of the kmers being built on the fly. The variable n is the total number of
     var
+        #i: int = 0  # only for debugging
         lk: int = 0
-        n: int = 0
 
     for c in sq:
         let ch = cast[uint8](c)
@@ -174,11 +174,11 @@ proc dna_to_kmers*(sq: Dna; k: int): pot_t {.noInit.}=
             reverse_kmer.kmer = 0
 
         if lk >= k:
-            inc(n, 2)
             result.seeds.add(forward_kmer)
             result.seeds.add(reverse_kmer)
             inc(forward_kmer.pos, 1)
             inc(reverse_kmer.pos, 1)
+        #inc(i)
 
 
     when defined(check_seed_length):
