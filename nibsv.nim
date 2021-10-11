@@ -272,6 +272,7 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxva
   var ovcf:VCF
   if not ovcf.open(output_path, mode="w"):
     quit &"couldn't open output vcf: {output_path}"
+
   ovcf.copy_header(ivcf.header)
   discard ovcf.header.hdr.bcf_hdr_set_samples(nil, 0)
   discard ovcf.header.add_format("NIRK", "1", "String", "nibsv: reference kmer (this and reverse-complement are used)")
@@ -432,6 +433,9 @@ proc main() =
   # re-open so we can write a new file
   if not ivcf.open(a.vcf, threads=2):
     quit &"[nibsv] couldn't open vcf file:{a.vcf}"
+
+  if ivcf.header.add_string("##nibsv-info=\"version:{nibsvVersion} commit:{nibsvCommit} k:{a.k} space:{a.space} ref:{a.ref} cram_ref:{a.cram_ref}\"") != Status.OK:
+    stderr.write_line "[nibsv] warning! couldn't add nibsv-info to the header of output vcf"
 
   svs.write(ivcf, output_vcf, ibam.sample_name, maxval)
   stderr.write_line &"[nibsv] wrote: {svs.len} variants to {output_vcf}"
