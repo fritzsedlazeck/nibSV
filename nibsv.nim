@@ -190,15 +190,14 @@ proc remove(kmers:var seq[uint64], excludes:var HashSet[uint64]) =
 
   # NOTE! we randomly remove about half of the kmers here
   # if we have more than 15. mostly these will be redundant anyway.
-  #[
-  if kmers.len >= 15:
-    kmers.sort()
-    var keep = newSeqOfCap[uint64](int(kmers.len/2) + 1)
-    for i, k in kmers:
-      if i mod 2 == 0: continue
-      keep.add(k)
-    kmers = keep
-   ]#
+  #if kmers.len >= 100:
+  #  let imod = int(kmers.len / 50 + 1)
+  #  kmers.sort()
+  #  var keep = newSeqOfCap[uint64](int(kmers.len/2) + 1)
+  #  for i, k in kmers:
+  #    if i mod imod == 0: continue
+  #    keep.add(k)
+  #  kmers = keep
 
 proc remove_reference_kmers(svs:var seq[Sv], ex:Excluder) =
   # now go back through svs and update each to remove any kmers that were 
@@ -284,13 +283,32 @@ proc argmax(a:seq[uint32], maxval:uint32): int =
       result = i
       m = v.int
 
-proc get_max_kmer(kmers:seq[uint64], k:int, idx:int): string =
+type vali = object
+  val: uint32
+  i: uint32
+
+proc vali_cmp(a, b:vali): int =
+  if a.val < b.val: return -1
+  elif a.val == b.val: return 0
+  return 1
+
+proc argmed(a:seq[uint32], maxval:uint32): int =
+  if len(a) == 0: return -1
+
+  var ai = newSeqOfCap[vali](a.len)
+  for i, val in a:
+    if val > maxval: continue
+    ai.add(vali(i:i.uint32, val: val))
+  ai.sort(vali_cmp)
+  return ai[len(ai) /% 2].i.int
+
+proc get_max_kmer(kmers:seq[uint64], k:int, space:int, idx:int): string =
   if kmers.len == 0 or idx < 0: return ""
   var km = kmers[idx]
-  result = newString(k)
+  result = newString(if space == 0: k else: 2 * k)
   km.decode(result)
 
-proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxval:uint32) =
+proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxval:uint32, use_med:bool) =
   ## write an output vcf with the counts.
   var ovcf:VCF
   if not ovcf.open(output_path, mode="w"):
@@ -309,15 +327,15 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxva
   for variant in ivcf:
     variant.vcf = ovcf
     let sv = svs[i]
-    let ref_max = sv.ref_counts.argmax(maxval=maxval)
-    var kms = @[get_max_kmer(sv.ref_kmers, sv.k.int, ref_max)]
+    let ref_max = if use_med: sv.ref_counts.argmed(maxval=maxval) else: sv.ref_counts.argmax(maxval=maxval)
+    var kms = @[get_max_kmer(sv.ref_kmers, sv.k.int, sv.space[0].int, ref_max)]
     var max_ref = if sv.ref_counts.len > 0 and ref_max >= 0: @[sv.ref_counts[ref_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIR", max_ref) == Status.OK
     if kms[0] != "":
       doAssert variant.format.set("NIRK", kms) == Status.OK
 
-    let alt_max = sv.alt_counts.argmax(maxval=maxval)
-    kms = @[get_max_kmer(sv.alt_kmers, sv.k.int, alt_max)]
+    let alt_max = if use_med: sv.alt_counts.argmed(maxval=maxval) else: sv.alt_counts.argmax(maxval=maxval)
+    kms = @[get_max_kmer(sv.alt_kmers, sv.k.int, sv.space[0].int, alt_max)]
     var max_alt = if sv.alt_counts.len > 0 and alt_max >= 0: @[sv.alt_counts[alt_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIA", max_alt) == Status.OK
 
@@ -360,6 +378,7 @@ proc main() =
   var p = newParser("nibsv"):
     option("-k", default="27", help="kmer-size must be <= 15 if space > 0 else 31")
     option("--space", default="", help="space between kmers", multiple=true)
+    flag("--use-med", help="use median instead of max for choosing kmer count")
     option("--step", default="1", help="step between generated reference kmers (larger values save more memory)")
     option("-o", default="nibsv.vcf.gz", help="output vcf")
     option("--cram-ref", help="optional reference fasta file for cram if difference from reference fasta")
@@ -467,7 +486,7 @@ proc main() =
   if ivcf.header.add_string(&"##nibsv-info=\"version:{nibsvVersion} commit:{nibsvGitCommit} k:{a.k} space:{a.space} ref:{a.ref} cram_ref:{a.cram_ref}\"") != Status.OK:
     stderr.write_line "[nibsv] warning! couldn't add nibsv-info to the header of output vcf"
 
-  svs.write(ivcf, output_vcf, ibam.sample_name, maxval)
+  svs.write(ivcf, output_vcf, ibam.sample_name, maxval, a.use_med)
   stderr.write_line &"[nibsv] wrote: {svs.len} variants to {output_vcf}"
   ivcf.close()
 
