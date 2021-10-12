@@ -131,8 +131,13 @@ proc get_all_kmers(svs:seq[Sv]): tuple[ref_kmers: HashSet[uint64], alt_kmers: Ha
       else:
         result.alt_kmers.incl(k)
 
+type Excluder = ref object
+  refs_to_exclude:HashSet[uint64]
+  alts_to_exclude:HashSet[uint64]
+
 {.push optimization: speed, checks: off.}
-proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, spaces:seq[uint8]): tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude: HashSet[uint64]] =
+proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, spaces:seq[uint8]): Excluder =
+  result = new(Excluder)
   # we want to exclude any kmers that are shared between ref and alt
   result.alts_to_exclude = exclude.union(all_ref_kmers.intersection(all_alt_kmers))
   exclude.clear()
@@ -195,7 +200,7 @@ proc remove(kmers:var seq[uint64], excludes:var HashSet[uint64]) =
     kmers = keep
    ]#
 
-proc remove_reference_kmers(svs:var seq[Sv], ex:var tuple[refs_to_exclude:HashSet[uint64], alts_to_exclude:HashSet[uint64]]) =
+proc remove_reference_kmers(svs:var seq[Sv], ex:Excluder) =
   # now go back through svs and update each to remove any kmers that were 
   # present in reference or presnt > 1 time for refs
   for sv in svs.mitems:
