@@ -135,7 +135,6 @@ type Excluder = ref object
   refs_to_exclude:HashSet[uint64]
   alts_to_exclude:HashSet[uint64]
 
-{.push optimization: speed, checks: off.}
 proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var HashSet[uint64], exclude: var HashSet[uint64], k:int, spaces:seq[uint8]): Excluder =
   result = new(Excluder)
   # we want to exclude any kmers that are shared between ref and alt
@@ -156,9 +155,9 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
     if chrom_len > 10_000_000:
       stderr.write chrom, " "
       flushFile(stderr)
-    for start in countup(0, chrom_len, 20_000_000):
-      var start = max(0, start - k + 1) # redo to account for edge effects
-      var sequence = fai.get(chrom, start, start + chunk_size)
+    for ostart in countup(0, chrom_len, 20_000_000):
+      var start = max(0, ostart - k + 1) # redo to account for edge effects
+      var sequence = fai.get(chrom, start, ostart + chunk_size)
       for space in spaces:
         for kmer in sequence.slide_space(k, space.uint64):
           if kmer.enc in all_alt_kmers:
@@ -173,7 +172,6 @@ proc get_exclude(fai:Fai, all_ref_kmers: var HashSet[uint64], all_alt_kmers: var
   for k, cnt in ref_counts:
     if cnt == 2'u8: result.refs_to_exclude.incl(k)
   stderr.write_line ""
-{.pop.}
 
 proc remove(kmers:var seq[uint64], excludes:var HashSet[uint64]) =
   var excluded = 0
@@ -218,14 +216,16 @@ proc to_kmer_cnt_table(svs: seq[Sv]): TableRef[uint64, int] =
         doAssert k notin result
       result[k] = 0
 
-{.push optimization: speed, checks: off.}
 proc count(svs:var seq[Sv], bam:Bam) =
 
   # kmer => count
   var kmer_cnts = svs.to_kmer_cnt_table()
   var sequence: string
   var k = svs[0].k.int
-  var spaces = svs[0].space
+  var spaces = newSeq[uint64](svs[0].space.len)
+  for s in svs[0].space:
+    spaces.add(s.uint64)
+
   stderr.write "[nibsv] "
   for tgt in bam.hdr.targets:
     stderr.write tgt.name, " "
@@ -235,7 +235,7 @@ proc count(svs:var seq[Sv], bam:Bam) =
       aln.sequence(sequence)
 
       for space in spaces:
-        for km in sequence.slide_space(k, space.uint64):
+        for km in sequence.slide_space(k, space):
           # we only care about kmers that are in our sv set.
           if km.enc in kmer_cnts:
             kmer_cnts[km.enc] += 1
@@ -248,7 +248,6 @@ proc count(svs:var seq[Sv], bam:Bam) =
       sv.ref_counts.add(kmer_cnts[k].uint32)
     for k in sv.alt_kmers:
       sv.alt_counts.add(kmer_cnts[k].uint32)
-{.pop.}
 
 proc check_unique_kmers(svs: seq[Sv]) =
   # this is just an internal debugging function that checks assumptions
