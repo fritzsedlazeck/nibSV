@@ -302,7 +302,7 @@ proc argmed(a:seq[uint32], maxval:uint32): int =
   ai.sort(vali_cmp)
   return ai[len(ai) /% 2].i.int
 
-proc get_max_kmer(kmers:seq[uint64], k:int, space:int, idx:int): string =
+proc get_ith_kmer(kmers:seq[uint64], k:int, space:int, idx:int): string =
   if kmers.len == 0 or idx < 0: return ""
   var km = kmers[idx]
   result = newString(if space == 0: k else: 2 * k)
@@ -328,14 +328,14 @@ proc write(svs: seq[Sv], ivcf:VCF, output_path:string, sample_name:string, maxva
     variant.vcf = ovcf
     let sv = svs[i]
     let ref_max = if use_med: sv.ref_counts.argmed(maxval=maxval) else: sv.ref_counts.argmax(maxval=maxval)
-    var kms = @[get_max_kmer(sv.ref_kmers, sv.k.int, sv.space[0].int, ref_max)]
+    var kms = @[get_ith_kmer(sv.ref_kmers, sv.k.int, sv.space[0].int, ref_max)]
     var max_ref = if sv.ref_counts.len > 0 and ref_max >= 0: @[sv.ref_counts[ref_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIR", max_ref) == Status.OK
     if kms[0] != "":
       doAssert variant.format.set("NIRK", kms) == Status.OK
 
     let alt_max = if use_med: sv.alt_counts.argmed(maxval=maxval) else: sv.alt_counts.argmax(maxval=maxval)
-    kms = @[get_max_kmer(sv.alt_kmers, sv.k.int, sv.space[0].int, alt_max)]
+    kms = @[get_ith_kmer(sv.alt_kmers, sv.k.int, sv.space[0].int, alt_max)]
     var max_alt = if sv.alt_counts.len > 0 and alt_max >= 0: @[sv.alt_counts[alt_max].int32] else: @[-1'i32]
     doAssert variant.format.set("NIA", max_alt) == Status.OK
 
