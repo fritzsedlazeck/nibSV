@@ -4,10 +4,11 @@
 
 ## Contributors
 
-Brent Pederson<sup>1</sup>, Christopher Dunn<sup>2</sup>, Eric Dawson<sup>3</sup>, Fritz Sedlazeck<sup>4</sup>, Peter Xie<sup>5</sup>, and Zev Kronenberg<sup>2</sup>
+Sairam Behera <sup>4</sup>, Brent Pederson<sup>1</sup>, Zev Kronenberg<sup>2</sup>, Christopher Dunn<sup>2</sup>, Eric Dawson<sup>3</sup> and Fritz Sedlazeck<sup>4</sup>
 
 <sup>1</sup> University of Utah; <sup>2</sup>PacBio; <sup>3</sup>Nvidia Corporation; <sup>4</sup>Baylor College of Medicine; <sup>5</sup>JBrowse (UC Berkeley);
 
+[Hackathon 2021 slides](https://docs.google.com/presentation/d/1rNnWrrfv85N9bPsQNnC_yictlJDqBvy7wt35ZMN6U1o/edit?usp=sharing)  
 ## Intro statement
 Structural variation (SV) are the largest source of genetic variation within the human population. Long read DNA sequencing is becoming the preferred method for discovering structural variants. Structural variation can be longer than a short-read (<500bp) DNA trace, meaning the SV allele is not contained, which causes challenges and problems in the detection.
 
