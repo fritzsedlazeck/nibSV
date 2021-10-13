@@ -298,6 +298,8 @@ proc argmed(a:seq[uint32], maxval:uint32): int =
   for i, val in a:
     if val > maxval: continue
     ai.add(vali(i:i.uint32, val: val))
+  if ai.len == 0:
+    return -1
   ai.sort(vali_cmp)
   return ai[len(ai) /% 2].i.int
 
