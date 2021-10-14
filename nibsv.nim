@@ -46,6 +46,12 @@ proc add_set(s:var seq[uint64], vals:HashSet[uint64]) =
     s[i] = v
     i.inc
 
+proc kmer_size(sv:Sv): seq[int] =
+  ## size of sequence for kmer, including space
+  for s in sv.space:
+    result.add(sv.k.int + s.int + int(s > 0) * sv.k.int)
+  if result.len == 0: result.add(sv.k.int)
+
 proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string], step:int) =
   # find unique ref and alt kmers.
   var refs = initHashSet[uint64]()
@@ -53,16 +59,25 @@ proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string
   var refexcl = initHashSet[uint64]()
 
   for ref_sequence in ref_sequences:
-    #if ref_sequence.len > 1000: stderr.write $sv & " +"
+    let skip_start = if ref_sequence.len > 100: max(sv.kmer_size).int + 10 else: ref_sequence.len
+    let skip_stop = if ref_sequence.len > 100: ref_sequence.len - max(sv.kmer_size).int - 10 else: ref_sequence.len
+    var ki = -1
     for space in sv.space:
-      for km in ref_sequence.slide_space(sv.k.int, space.uint64):
-        # given a reference sequence (in a DEL) of 1000 bases, we don't need to
-        # generate+save every possible kmer.
+      let space = space.uint64
+      for km in ref_sequence.slide_space(sv.k.int, space):
+        ki.inc
+        if ki >= skip_start and ki <= skip_stop: continue
         refs.incl(km.enc)
 
   for alt_sequence in alt_sequences:
+    # for large insertion sequences we don't need all of the internal kmers so here, we skip the internal kmers.
+    let skip_start = if alt_sequence.len > 100: max(sv.kmer_size).int + 10 else: alt_sequence.len
+    let skip_stop = if alt_sequence.len > 100: alt_sequence.len - max(sv.kmer_size).int - 10 else: alt_sequence.len
     for space in sv.space:
-      for km in alt_sequence.slide_space(sv.k.int, space.uint64):
+      var ki = -1
+      for km in alt_sequence.slide_space(sv.k.int, space):
+        ki.inc
+        if ki >= skip_start and ki <= skip_stop: continue
         if km.enc in refs:
           # it's not unique to refs so we exclude from there.
           refexcl.incl(km.enc)
@@ -74,12 +89,6 @@ proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string
 
   sv.ref_kmers.add_set(refs)
   sv.alt_kmers.add_set(alts)
-
-proc kmer_size(sv:Sv): seq[int] =
-  ## size of sequence for kmer, including space
-  for s in sv.space:
-    result.add(sv.k.int + s.int + int(s > 0) * sv.k.int)
-  if result.len == 0: result.add(sv.k.int)
 
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
@@ -97,7 +106,10 @@ proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:
     result.alt_sequence.add(result.ref_sequence[i][0 ..< (kmer_size - overlap)])
     doAssert sv.ref_allele[0] == result.ref_sequence[i][(kmer_size - overlap)]
     if sv.ref_allele.len == 1: # INS
+      #if sv.alt_allele.len < 100:
       result.alt_sequence[i] &= sv.alt_allele
+      #else:
+      #  result.alt_sequence[i] &= sv.alt_allele[0..(kmer_size + 10)] & repeat('N', kmer_size) & sv.alt_allele[^(sv.alt_allele.len - kmer_size - 10)..<sv.alt_allele.len]
     else:
     # NOTE: this doesn't work for REF and ALT lengths > 1
       result.alt_sequence[i] &= result.ref_sequence[i][kmer_size - overlap]
