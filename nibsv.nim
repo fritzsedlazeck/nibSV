@@ -94,8 +94,15 @@ proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
-proc parse_sv_allele*(sv_allele: string): int =
-  return 1
+proc parse_sv_allele*(sv_allele: string): string =
+  let bracket = sv_allele[^1]
+  assert bracket == '[' or bracket == ']'
+  let first = sv_allele.find(bracket)
+  assert first != -1
+  assert first != sv_allele.len - 1
+  assert bracket == sv_allele[first]
+  let name = sv_allele[(first + 1) .. (sv_allele.len - 2)]
+  return name
 
 proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:seq[string], alt_sequence:seq[string]] =
   let overlap = overlap.int
