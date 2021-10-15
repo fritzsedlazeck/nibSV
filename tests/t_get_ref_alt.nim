@@ -3,4 +3,4 @@ import unittest
 
 suite "nibsv":
     test "foo":
-        check 1 == 1
+        check parse_sv_allele("hi") == 1

@@ -1,3 +1,4 @@
+# vim: sts=2:ts=2:sw=2:et:tw=0
 import argparse
 import sets
 import tables
@@ -92,6 +93,9 @@ proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string
 
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
+
+proc parse_sv_allele*(sv_allele: string): int =
+  return 1
 
 proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:seq[string], alt_sequence:seq[string]] =
   let overlap = overlap.int

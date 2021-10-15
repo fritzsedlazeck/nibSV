@@ -1,4 +1,4 @@
-#NIMBLE_DIR?=${CURDIR}/nimbleDir
+#NIMBLE_DIR?=${CURDIR}/.git/NIMBLE_DIR
 #export NIMBLE_DIR
 # Alternatively, use --nimbleDir:${NIMBLE_DIR} everywhere
 UNAME=$(shell uname)
