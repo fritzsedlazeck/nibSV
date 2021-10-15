@@ -6,7 +6,6 @@ author        = "Christopher Dunn"
 author        = "Brent Pedersen"
 description   = "Structural Variant nibbles"
 license       = "MIT"
-srcDir        = "src"
 bin           = @["nibsv"]
 
 
