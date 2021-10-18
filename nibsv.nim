@@ -22,6 +22,12 @@ steps:
 const nibsvVersion* = "0.0.2"
 const nibsvGitCommit* = staticExec("git rev-parse --verify HEAD")
 
+type Breakend* = object
+  chrom*: string
+  pos*: int
+  pre_bases*: string
+  post_bases*: string
+
 type Sv* = object
   chrom*: string
   pos*: int # 0-based position
@@ -94,9 +100,9 @@ proc update_kmers(sv:var Sv, ref_sequences:seq[string], alt_sequences:seq[string
 proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
-proc parse_sv_allele*(sv_allele: string): int =
+proc parse_sv_allele*(sv_allele: string): Breakend =
   var first_parens_index: int = 0
-  var second_parens_index: int = 0
+  var second_parens_index: int = sv_allele.len - 1
   var pre_bases: string
   var post_bases: string
   var chrom: string
@@ -104,21 +110,29 @@ proc parse_sv_allele*(sv_allele: string): int =
 
   while sv_allele[first_parens_index] != '[' and sv_allele[first_parens_index] != ']':
     first_parens_index.inc
+    if first_parens_index == sv_allele.len:
+      raise newException(OSError, "Error [parse_sv_allele] No opening parenthesis found when parsing SV allele.")
 
   while sv_allele[second_parens_index] != '[' and sv_allele[second_parens_index] != ']':
-    second_parens_index.inc
+    second_parens_index.dec
+    if second_parens_index < 0:
+      raise newException(OSError, "Error [parse_sv_allele] No closing parenthesis found when parsing SV allele.")
+    if second_parens_index == first_parens_index:
+      raise newException(OSError, "Error [parse_sv_allele] Only one parenthesis located when parsing SV allele.")
   
-  if first_parens_index > 0:
-    pre_bases = sv_allele[0 ..< first_parens_index]
-  if second_parens_index > 0:
-    post_bases = sv_allele[second_parens_index ..< sv_allele.len]
+  pre_bases = sv_allele[0 ..< first_parens_index]
+  post_bases = sv_allele[second_parens_index ..< sv_allele.len]
   
-  var chrom_pos_splits: seq[string] = (sv_allele[first_parens_index ..< second_parens_index]).split(sep=':')
+  var chrom_pos_splits: seq[string] = (sv_allele[first_parens_index + 1 ..< second_parens_index]).split(sep=':')
   chrom = chrom_pos_splits[0]
   pos = strUtils.parseInt(chrom_pos_splits[1])
-  
-  
 
+  result.chrom = chrom
+  result.pos = pos
+  result.pre_bases = pre_bases
+  result.post_bases = post_bases
+  
+  
 proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:seq[string], alt_sequence:seq[string]] =
   let overlap = overlap.int
 
