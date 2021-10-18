@@ -10,7 +10,7 @@ endif
 
 build:
 	nim c nibsv.nim
-	#${install} src/nibsv
+	${install} nibsv
 release:
 	nim c -d:release -d:danger nibsv.nim
 tests:
@@ -23,3 +23,4 @@ install:
 pretty:
 	find src -name '*.nim' | xargs -L1 nimpretty --maxLineLen=1024
 	find tests -name '*.nim' | xargs -L1 nimpretty --maxLineLen=1024
+.PHONY: tests
