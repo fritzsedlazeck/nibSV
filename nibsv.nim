@@ -37,6 +37,11 @@ type Sv* = object
   alt_allele*: string
   ref_kmers*:seq[uint64]
   alt_kmers*:seq[uint64]
+  svtype: string # The SVTYPE, of which only DEL, INS, INV, TRA, DUP and BND will be considered valid.
+  sv_len: int # SV length from the SVLEN field, if present
+  sv_end: int # SV end from the END field, or calculated from the SVLEN + pos if present.
+  sv_seq*: string # SV sequences, either from the SEQ field or calculated using the reference
+
 
   # these correspond to the counts of kmers seen for each kmer in ref and alt
   # kmers respectively.
@@ -137,6 +142,8 @@ proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:
   let overlap = overlap.int
 
   for i, kmer_size in sv.kmer_size:
+    if sv.sv_type == "BND" or sv.sv_type == "TRA":
+      continue
     result.ref_sequence.add( fai.get(sv.chrom, max(0, sv.pos - kmer_size + overlap), sv.stop + kmer_size - overlap))
     # reference goes back from start:
     #     k + space + k
@@ -145,7 +152,7 @@ proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:
 
     result.alt_sequence.add(result.ref_sequence[i][0 ..< (kmer_size - overlap)])
     doAssert sv.ref_allele[0] == result.ref_sequence[i][(kmer_size - overlap)]
-    if sv.ref_allele.len == 1: # INS
+    if sv.sv_type == "INS": # INS
       #if sv.alt_allele.len < 100:
       result.alt_sequence[i] &= sv.alt_allele
       #else:
@@ -493,7 +500,18 @@ proc main() =
   for v in ivcf:
     #if v.FILTER notin ["PASS", "LongReadHomRef"]: continue
     #if v.REF.len != 1: continue
-    var sv = Sv(ref_allele: $v.REF, alt_allele: $v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:spaces)
+
+    var svtype = ""
+    var svlen = new_seq[int32](2)
+    var svend = new_seq[int32](2)
+    var x: int
+    if v.info.get("SVTYPE", svtype) == Status.OK:
+      x = 1
+    if v.info.get("SVLEN", svlen) == Status.OK:
+      x = 1
+    if v.info.get("END", svend) == Status.OK:
+      x = 1
+    var sv = Sv(ref_allele: $v.REF, alt_allele: $v.ALT[0], pos: v.start.int, chrom: $v.CHROM, k:k.uint8, space:spaces, svtype:svtype, svlen: svlen[0], svend:svend[0])
 
     # we have to skip bad variants. but leave them in so we keep the order.
     if v.ALT[0][0] == v.REF[0]: # and (v.ALT[0].len > ml or v.REF.len > ml):
