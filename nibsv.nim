@@ -95,7 +95,29 @@ proc stop*(sv:Sv): int {.inline.} =
   result = sv.pos + sv.ref_allele.len
 
 proc parse_sv_allele*(sv_allele: string): int =
-  return 1
+  var first_parens_index: int = 0
+  var second_parens_index: int = 0
+  var pre_bases: string
+  var post_bases: string
+  var chrom: string
+  var pos: int
+
+  while sv_allele[first_parens_index] != '[' and sv_allele[first_parens_index] != ']':
+    first_parens_index.inc
+
+  while sv_allele[second_parens_index] != '[' and sv_allele[second_parens_index] != ']':
+    second_parens_index.inc
+  
+  if first_parens_index > 0:
+    pre_bases = sv_allele[0 ..< first_parens_index]
+  if second_parens_index > 0:
+    post_bases = sv_allele[second_parens_index ..< sv_allele.len]
+  
+  var chrom_pos_splits: seq[string] = (sv_allele[first_parens_index ..< second_parens_index]).split(sep=':')
+  chrom = chrom_pos_splits[0]
+  pos = strUtils.parseInt(chrom_pos_splits[1])
+  
+  
 
 proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:seq[string], alt_sequence:seq[string]] =
   let overlap = overlap.int
@@ -118,6 +140,11 @@ proc generate_ref_alt*(sv:var Sv, fai:Fai, overlap:uint8=6): tuple[ref_sequence:
     # NOTE: this doesn't work for REF and ALT lengths > 1
       result.alt_sequence[i] &= result.ref_sequence[i][kmer_size - overlap]
 
+    ## Example: kmer size = 5 and overlap is 3, ref_seq is of len 10:
+    ## 10 - (5 - 3 + 1) -> 10 - (3 - 1)
+    ## TODO: possible double substraction at ^(overlap - 1)
+    ## Number of elements - (value)
+    ## e.g. ^1 == n_elements -1 == last_value_in_seq
     result.alt_sequence[i] &= result.ref_sequence[i][^(kmer_size.int - overlap + 1) ..< ^(overlap - 1)]
     when defined(debug):
       if sv.ref_allele.len == 1 or sv.alt_allele.len == 1:
