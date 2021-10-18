@@ -10,3 +10,4 @@ suite "nibsv":
     var bnd = parse_sv_allele(s)
     check bnd.pos == 461
     check bnd.chrom == "chr1_KI270709v1_random"
+    check bnd.pre_bases == "T"
