@@ -1,6 +1,8 @@
 <img align="right" width="300" height="300" src="https://github.com/collaborativebioinformatics/nibSV/blob/main/SVNibbler.png">
 
 # NibblerSV
+
+Fading out to https://github.com/brentp/nibsv <-- 
 ## Intro 
 
 **nibsv** genotypes base-resolved structural variants by counting the occurence of
